@@ -1,8 +1,10 @@
+using MailKit.Net.Smtp;
+using MailKit.Security;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using MimeKit;
 using O_market.Models;
 using System.Net;
-using System.Net.Mail;
 
 namespace O_market.Services
 {
@@ -33,78 +35,65 @@ namespace O_market.Services
 
         public async Task<(bool Success, string Message)> SendOtpAsync(string email, string otp)
         {
-            _logger.LogInformation("Attempting to send OTP email to {Email}. DisableEmailSending is {Disabled}", email, _disableEmailSending);
+            _logger.LogInformation("MailKit: Attempting to send OTP email to {Email}. DisableEmailSending is {Disabled}", email, _disableEmailSending);
 
             if (_disableEmailSending)
             {
-                _logger.LogInformation("[TEST MODE] OTP for {Email}: {Otp}", email, otp);
-                Console.WriteLine($"🔐 [TEST MODE] OTP for {email}: {otp}");
+                _logger.LogInformation("MailKit: [TEST MODE] OTP for {Email}: {Otp}", email, otp);
                 return (true, "OTP logged to console (Test Mode)");
             }
 
             if (string.IsNullOrEmpty(_emailSettings.Username) || string.IsNullOrEmpty(_emailSettings.Password))
             {
-                _logger.LogError("Email configuration missing: Username or Password is not set.");
+                _logger.LogError("MailKit: Email configuration missing: Username or Password is not set.");
                 return (false, "Email configuration error: Missing credentials.");
             }
 
+            var message = new MimeMessage();
+            message.From.Add(new MailboxAddress(_emailSettings.SenderName, _emailSettings.SenderEmail));
+            message.To.Add(new MailboxAddress("", email));
+            message.Subject = "🔐 OTP Verification - QuickSwap";
+
+            var bodyBuilder = new BodyBuilder
+            {
+                HtmlBody = $@"
+                <div style='font-family: Arial, sans-serif; max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 10px;'>
+                    <h2 style='color: #4a148c; text-align: center;'>Verify Your Email</h2>
+                    <p>Hello,</p>
+                    <p>Your OTP for <strong>QuickSwap</strong> is:</p>
+                    <div style='background: #f3e5f5; color: #4a148c; font-size: 32px; font-weight: bold; text-align: center; padding: 20px; border-radius: 8px; margin: 20px 0; letter-spacing: 5px;'>
+                        {otp}
+                    </div>
+                    <p>This code expires in 10 minutes.</p>
+                    <p>If you didn't request this, please ignore this email.</p>
+                    <hr style='border: none; border-top: 1px solid #eee;'>
+                    <p style='font-size: 12px; color: #888;'>This is an automated message from QuickSwap.</p>
+                </div>"
+            };
+
+            message.Body = bodyBuilder.ToMessageBody();
+
+            using var client = new SmtpClient();
             try
             {
-                var message = new MailMessage
-                {
-                    From = new MailAddress(_emailSettings.SenderEmail, _emailSettings.SenderName),
-                    Subject = "🔐 OTP Verification - QuickSwap",
-                    Body = $@"
-                    <!DOCTYPE html>
-                    <html>
-                    <body style='font-family: Arial, sans-serif; line-height: 1.6;'>
-                        <div style='max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;'>
-                            <h2 style='color: #4a148c;'>Verify Your Email Address</h2>
-                            <p>Hello,</p>
-                            <p>Use the following OTP to complete your registration on <strong>QuickSwap</strong>:</p>
-                            <div style='background: #f3e5f5; color: #4a148c; font-size: 32px; font-weight: bold; letter-spacing: 5px; padding: 20px; text-align: center; border-radius: 8px; margin: 20px 0;'>
-                                {otp}
-                            </div>
-                            <p><strong>⏰ Valid for 10 minutes.</strong></p>
-                            <p>If you didn't request this, please ignore this email.</p>
-                            <hr style='border: none; border-top: 1px solid #eee; margin-top: 30px;'>
-                            <p style='color: #777; font-size: 12px;'>The QuickSwap Team</p>
-                        </div>
-                    </body>
-                    </html>",
-                    IsBodyHtml = true
-                };
-
-                message.To.Add(email);
-
-                using var smtpClient = new SmtpClient(_emailSettings.SmtpServer, _emailSettings.SmtpPort)
-                {
-                    EnableSsl = _emailSettings.EnableSsl,
-                    Credentials = new NetworkCredential(_emailSettings.Username, _emailSettings.Password),
-                    DeliveryMethod = SmtpDeliveryMethod.Network,
-                    UseDefaultCredentials = false,
-                    Timeout = 15000
-                };
-
-                _logger.LogInformation("Sending email via {SmtpServer}:{Port} using user {Username}...", _emailSettings.SmtpServer, _emailSettings.SmtpPort, _emailSettings.Username);
+                _logger.LogInformation("MailKit: Connecting to {Server}:{Port}...", _emailSettings.SmtpServer, _emailSettings.SmtpPort);
                 
-                await smtpClient.SendMailAsync(message);
+                // For Gmail, StartTls is typical for port 587
+                await client.ConnectAsync(_emailSettings.SmtpServer, _emailSettings.SmtpPort, SecureSocketOptions.StartTls);
 
-                _logger.LogInformation("✅ OTP email sent successfully to {Email}", email);
-                Console.WriteLine($"✅ OTP email sent successfully to {email}");
+                _logger.LogInformation("MailKit: Authenticating as {Username}...", _emailSettings.Username);
+                await client.AuthenticateAsync(_emailSettings.Username, _emailSettings.Password);
+
+                await client.SendAsync(message);
+                await client.DisconnectAsync(true);
+
+                _logger.LogInformation("MailKit: ✅ OTP email sent successfully to {Email}", email);
                 return (true, "OTP sent successfully");
-            }
-            catch (SmtpException smtpEx)
-            {
-                _logger.LogError(smtpEx, "SMTP Error sending to {Email}. Status: {StatusCode}", email, smtpEx.StatusCode);
-                Console.WriteLine($"❌ SMTP Error for {email}: {smtpEx.Message}");
-                return (false, $"SMTP Error: {smtpEx.Message}");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Unexpected error sending email to {Email}", email);
-                Console.WriteLine($"❌ Email failed for {email}: {ex.Message}");
-                return (false, $"Failed to send email: {ex.Message}");
+                _logger.LogError(ex, "MailKit: ❌ Failed to send email to {Email}. Error: {Message}", email, ex.Message);
+                return (false, $"Email failed: {ex.Message}");
             }
         }
     }
