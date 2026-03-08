@@ -148,7 +148,7 @@ builder.Services.AddCors(options =>
             .WithOrigins(
                 "http://localhost:4200",
                 "https://localhost:4200",
-                "https://quickswap-frontend.vercel.app"  // Will update with exact URL after deploy
+                "https://quick-swap-frontend.vercel.app"
             )
             .SetIsOriginAllowedToAllowWildcardSubdomains()
             .AllowAnyHeader()
