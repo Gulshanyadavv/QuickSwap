@@ -86,7 +86,6 @@ builder.Services.AddScoped<IMessageService, MessageService>();
 builder.Services.AddScoped<IRecommendationService, RecommendationService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
-builder.Services.AddScoped<IAdService, AdService>();
 
 builder.Services.AddSignalR();
 
@@ -173,6 +172,9 @@ builder.Services.AddResponseCaching();
 builder.Services.AddHttpClient();
 builder.Services.Configure<EmailSettings>(
     builder.Configuration.GetSection("EmailSettings")
+);
+builder.Services.Configure<CloudinarySettings>(
+    builder.Configuration.GetSection("CloudinarySettings")
 );
 builder.Services.AddHttpContextAccessor();
 var app = builder.Build();

@@ -6,6 +6,9 @@ using O_market.Models;
 using O_market.Repositories;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Hosting;
+using CloudinaryDotNet;
+using CloudinaryDotNet.Actions;
+using Microsoft.Extensions.Options;
 
 namespace O_market.Services
 {
@@ -17,6 +20,7 @@ namespace O_market.Services
         private readonly IMapper _mapper;
         private readonly IWebHostEnvironment _env;
         private readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly Cloudinary _cloudinary;
 
         public AdService(
             OlxdbContext context,
@@ -24,7 +28,8 @@ namespace O_market.Services
             IFavoriteRepository favoriteRepo,
             IMapper mapper,
             IWebHostEnvironment env,
-            IHttpContextAccessor httpContextAccessor)
+            IHttpContextAccessor httpContextAccessor,
+            IOptions<CloudinarySettings> cloudinaryConfig)
         {
             _context = context;
             _adRepo = adRepo;
@@ -32,19 +37,30 @@ namespace O_market.Services
             _mapper = mapper;
             _env = env;
             _httpContextAccessor = httpContextAccessor;
+
+            var acc = new Account(
+                cloudinaryConfig.Value.CloudName,
+                cloudinaryConfig.Value.ApiKey,
+                cloudinaryConfig.Value.ApiSecret
+            );
+            _cloudinary = new Cloudinary(acc);
         }
 
         // Helper method to construct full image URLs
-        private string GetFullImageUrl(string relativePath)
+        private string GetFullImageUrl(string imagePath)
         {
-            if (string.IsNullOrEmpty(relativePath))
+            if (string.IsNullOrEmpty(imagePath))
                 return "/assets/no-image.png";
+
+            // If it's already a full URL (Cloudinary), return as is
+            if (imagePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                return imagePath;
 
             var request = _httpContextAccessor.HttpContext?.Request;
             if (request == null)
-                return relativePath;
+                return imagePath;
 
-            return $"{request.Scheme}://{request.Host}{relativePath}";
+            return $"{request.Scheme}://{request.Host}{imagePath}";
         }
 
         // =====================================================
@@ -469,28 +485,29 @@ namespace O_market.Services
         // =====================================================
         private async Task SaveImagesAsync(int adId, List<IFormFile> images)
         {
-            var path = Path.Combine(
-                _env.WebRootPath,
-                "uploads",
-                "ads",
-                adId.ToString());
-
-            Directory.CreateDirectory(path);
-
             int order = 0;
 
             foreach (var image in images.Take(8))
             {
-                var fileName = $"{Guid.NewGuid()}{Path.GetExtension(image.FileName)}";
-                var filePath = Path.Combine(path, fileName);
+                var uploadParams = new ImageUploadParams
+                {
+                    File = new FileDescription(image.FileName, image.OpenReadStream()),
+                    Folder = "QuickSwap/ads",
+                    Transformation = new Transformation().Width(800).Height(600).Crop("limit")
+                };
 
-                using var stream = new FileStream(filePath, FileMode.Create);
-                await image.CopyToAsync(stream);
+                var uploadResult = await _cloudinary.UploadAsync(uploadParams);
+
+                if (uploadResult.Error != null)
+                {
+                    // Log error or skip
+                    continue;
+                }
 
                 _context.AdImages.Add(new AdImage
                 {
                     AdId = adId,
-                    ImageUrl = $"/uploads/ads/{adId}/{fileName}",
+                    ImageUrl = uploadResult.SecureUrl.ToString(), // Store the full Cloudinary URL
                     DisplayOrder = order,
                     IsPrimary = order == 0
                 });
