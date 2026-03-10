@@ -28,6 +28,9 @@ namespace O_market.Services
             if (string.IsNullOrEmpty(relativePath))
                 return "/assets/no-image.png";
 
+            if (relativePath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                return relativePath;
+
             var request = _httpContextAccessor.HttpContext?.Request;
             if (request == null)
                 return relativePath;

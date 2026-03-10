@@ -36,7 +36,9 @@ namespace O_market.Services
             {
                 var images = f.Ad.AdImages
                     .OrderBy(i => i.DisplayOrder)
-                    .Select(i => $"{baseUrl}/{i.ImageUrl.TrimStart('/')}")
+                    .Select(i => i.ImageUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase) 
+                                 ? i.ImageUrl 
+                                 : $"{baseUrl}/{i.ImageUrl.TrimStart('/')}")
                     .ToList();
 
                 return new FavoriteResponseDto
